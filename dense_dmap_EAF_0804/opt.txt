@@ -1,0 +1,40 @@
+{
+  "block_config": [
+    [
+      4,
+      4,
+      4
+    ],
+    [
+      4,
+      4,
+      4
+    ]
+  ],
+  "batchsize": 16,
+  "batchsize_val": 32,
+  "imagesize": 512,
+  "initial_lr": 0.0001,
+  "ep_start": 100,
+  "num_classes": 5,
+  "lr_reduction": 0.2,
+  "lr_steps": [
+    0,
+    200,
+    400,
+    601
+  ],
+  "model_ID": "dense_dmap_EAF_0804",
+  "path_tr_ls": "data/data_for_training/trainingdata_esthiBCH4cls_BCH5cls_0804.csv",
+  "path_model": "MRI_segmentation_pipeline/models_seg_old.py",
+  "path_main": "MRI_segmentation_pipeline/train_2024Aug_EAF.py",
+  "path_dataset": "MRI_segmentation_pipeline/dataset_2024Aug.py",
+  "ssl": false,
+  "distance_map": 1,
+  "reg_TV": 1,
+  "syn_air": 1,
+  "path_resume": "checkpoints_2024/dense_dmap_EAF_0729/model_epoch_200.pth",
+  "path_TL": "checkpoints_2024/dense_dmap_ESTHIBCH_0719/model_epoch_300a.pth",
+  "notation": "Description:.",
+  "path_ckp": "checkpoints_2024/dense_dmap_EAF_0804"
+}

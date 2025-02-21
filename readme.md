@@ -1,0 +1,1 @@
+https://industrious-domain-3a8.notion.site/doc-MRI-segmentation-5c3fd775cd164f359fc30be29d192362?pvs=4
