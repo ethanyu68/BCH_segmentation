@@ -158,7 +158,7 @@ def generate_dmap(h,w,rh,rw):
             dmap[i][j] = np.sqrt(((i - h//2)*rh)**2 + ((j - w//2)*rw)**2)
     return np.uint8(dmap)
 
-def process_single(img, dmap=None):
+def process_single(img, dmap=None, label=None):
     H, W = img.shape
     # crop the image to make it multiples of 16
     h = H % 16
@@ -169,14 +169,19 @@ def process_single(img, dmap=None):
     dmap = dmap[hl:H-hr, wl:W-wr]
     img = np.rot90(img, k=1)
     dmap = np.rot90(dmap, k=1)
-    if dmap is not None:
+    if not label:
+        label = label[hl:H-hr, wl:W-wr]
+    if not dmap:
         img = np.concatenate([img[None, None, :, :], img[None, None, :, :], dmap[None, None, :, :]], 1)
     else:
         img = np.concatenate([img[None, None, :, :], img[None, None, :, :], img[None, None, :, :]], 1)
     mean = np.array([0.485, 0.456, 0.406]).reshape([1, 3, 1, 1])
     std = np.array([0.229, 0.224, 0.225]).reshape([1, 3, 1, 1])
     img = (img - mean) / std
-    return img
+    if not label:
+        return img, label
+    else:
+        return img
 
 
 def normalize_intensity(array,  margin_ratio=20, vmax_percent=99.7, vmin_percent =90):
