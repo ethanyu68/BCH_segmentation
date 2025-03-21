@@ -4,6 +4,7 @@ import pandas as pd
 import torch
 import torch.backends.cudnn as cudnn
 import torch.nn as nn
+import cv2
 import torch.nn.functional as F
 import torch.optim as optim
 #from torch.utils.tensorboard import SummaryWriter
@@ -17,45 +18,23 @@ import torchvision.models as models
 import numpy as np
 import argparse
 import shutil
-import json
-#from kornia.losses import total_variation
-
-def init_weights(m):
-    if isinstance(m, nn.Conv2d):
-        torch.nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
-        if m.bias is not None:
-            torch.nn.init.constant_(m.bias, 0)
-    elif isinstance(m, nn.BatchNorm2d):
-        torch.nn.init.constant_(m.weight, 1)
-        torch.nn.init.constant_(m.bias, 0)
-    elif isinstance(m, nn.Linear):
-        torch.nn.init.normal_(m.weight, 0, 0.01)
-        torch.nn.init.constant_(m.bias, 0)
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--block_config", default=((4,4,4),(4,4,4)), type=tuple)
 parser.add_argument("--batchsize", default=8, type=int)
-parser.add_argument("--batchsize_val", default=32, type=int)
+parser.add_argument("--batchsize_val", default=16, type=int)
 parser.add_argument("--imagesize", default=448, type=int)
-parser.add_argument("--initial_lr", default=0.0001, type=float, help='initial learning rate')
-parser.add_argument("--ep_start", default=1, type=int)
+
 parser.add_argument("--num_classes", default=3, type=int)
-parser.add_argument("--lr_reduction", default=0.2, type=float, help='the learning rate will be reduced to <lr_reduction> of current rate at every <step size>')
-parser.add_argument("--lr_steps", default=[0, 200, 400, 600], type=int, help='learning rate will be reduced at every <step_size> epoch')
-parser.add_argument("--model_ID",default='dense_dmap_etv167preop_pre', help='the model ID to be saved')
+parser.add_argument("--model_ID",default='dense_dmap_etv167preop', help='the model ID to be saved')
 
 parser.add_argument("--path_data",default='./data/npy/etv167_NIFTI_pre_reviewed_0219/', help='the training dataset csv')
 
-parser.add_argument("--path_model",default='./MRI_segmentation_pipeline/models_seg_old.py', help='the model ID to be saved')
-parser.add_argument("--path_main",default='./MRI_segmentation_pipeline/train_2025Mar_CV.py', help='the path of main file to be saved')
-parser.add_argument("--path_dataset",default='./MRI_segmentation_pipeline/dataset_2025Mar.py', help='the path of datset file to be saved')
-parser.add_argument("--ssl", default=False)
 parser.add_argument("--distance_map", default=1)
 parser.add_argument("--reg_TV", default=1, type=int)
 parser.add_argument("--syn_air", default=0, type=int)
 
-parser.add_argument("--path_resume",default="checkpoints_2024/dense_dmap_EAF_0729/model_epoch_200.pth", help='the model ID to be saved')
-parser.add_argument("--path_TL",default="checkpoints_2025/pretrain/dense_dmap_esthibch_0719_pretrain_model_epoch_300.pth", help='the model ID to be saved')
+parser.add_argument("--path_resume",default="./checkpoints_2025/dense_dmap_etv167preop/fold1/ckp_429.pth", help='the model ID to be saved')
 ##
 parser.add_argument("--notation", default='Description:.')
 opt= parser.parse_args()
@@ -68,84 +47,21 @@ def main():
     #os.environ['CUDA_VISIBLE_DEVICES']='0'
     #os.environ['NCCL_SHM_DISABLE']='1'
     #os.environ["NCCL_DEBUG"] = "INFO"
+    opt.expm = os.path.join(opt.path_resume.split('/')[0], opt.path_resume.split('/')[1], opt.path_resume.split('/')[2])
     dice_loss = DiceLoss()
+    # setting model
+    fold = 1
+    model = DenseTV(num_classes=opt.num_classes, pretrain=False, block_config=opt.block_config)
+    state = torch.load(opt.path_resume)['model_state_dict']
+    model = torch.nn.DataParallel(model).cuda()
+    model.load_state_dict(state)
+    print("===> resume the checkpoint:{}".format(opt.path_resume))
 
-    path_ckp = os.path.join('./checkpoints_2025/', opt.model_ID)
-    opt.path_ckp = path_ckp
-    if not os.path.exists(path_ckp):
-        os.makedirs(os.path.join(path_ckp))
-        os.makedirs(os.path.join(path_ckp, 'checkpoints'))
-    shutil.copy(opt.path_model, path_ckp)
-    shutil.copy(opt.path_main, path_ckp)
-    shutil.copy(opt.path_dataset, path_ckp)
-    # save opt
-    with open(path_ckp + '/opt.txt', 'w') as f:
-        json.dump(opt.__dict__, f, indent=2)
-
+    test_set = Dataset(path_fdr=opt.path_data, fold=fold, opt=opt, phase='test', patch=False)
+    test_data_loader = DataLoader(dataset=test_set, batch_size=opt.batchsize_val, shuffle=False)
     
-    
-    # freeze encoder
-    # for param in model.encoder.parameters():
-    #     param.requires_grad = False
-   
-    #model = model.cuda()
-    for fold in [1]:
-        # setting model
-        model = DenseTV(num_classes=opt.num_classes, pretrain=False, block_config=opt.block_config)
-        #model = UNet(out_channels=4)
-        model.apply(init_weights)
-        # load the self-supervised trained encoder
-        if os.path.exists(opt.path_TL):
-            state = torch.load(opt.path_TL)['model']
-            encoder = OrderedDict()
-            for layer in state.keys():
-                if 'encoder' in layer:
-                    encoder[layer[15:]] = state[layer]
-            model.encoder.load_state_dict(encoder)
-            print("===> load the pre-trained encoder:{}".format(opt.path_TL))
-            model = torch.nn.DataParallel(model).cuda()
-        elif os.path.exists(opt.path_resume):
-            model = torch.nn.DataParallel(model).cuda()
-            state = torch.load(opt.path_resume)['model']
-            model.load_state_dict(state)
-            #opt.ep_start = torch.load(opt.path_resume)['epoch']
-            print("===> resume the checkpoint:{}".format(opt.path_resume))
-        else:
-            model = torch.nn.DataParallel(model).cuda()
-        opt.path_ckp = os.path.join(path_ckp, 'fold{}'.format(fold))
-        if not os.path.exists(opt.path_ckp):
-            os.makedirs(opt.path_ckp)
-        print("===> Setting Optimizer")
-        optimizer = optim.Adam(model.parameters(), lr=opt.initial_lr, weight_decay=1e-6)
-
-        train_set = Dataset(path_fdr=opt.path_data, fold=fold, opt=opt, phase='train', patch=False)
-        val_set = Dataset(path_fdr=opt.path_data, fold=fold, opt=opt, phase='val', patch=False)
-
-        train_data_loader = DataLoader(dataset=train_set, num_workers = 1, batch_size=opt.batchsize, shuffle=True)
-        val_data_loader = DataLoader(dataset=val_set, batch_size=opt.batchsize_val, shuffle=False)
-
-        results = {'epoch':[0], 'average': [1000], 'background': [1000], 'CSF':[1000], 'tissue':[1000],'air':[1000]}
-        for epoch in range(opt.ep_start, opt.lr_steps[-1]):
-            train(train_data_loader, optimizer, model, epoch, dice_loss, opt)
-        
-            avg_loss, per_channel_loss = validate(val_data_loader, model, epoch, dice_loss, opt)
-            print("===> validation:{}".format(per_channel_loss))
-
-            if avg_loss < results['average'][-1]:
-                save_checkpoint(model, optimizer, epoch, per_channel_loss, filepath=os.path.join(opt.path_ckp, "ckp_{}.pth".format(epoch)))
-                results['epoch'].append(epoch)
-                results['average'].append(avg_loss)
-                results['background'].append(1 -per_channel_loss[0])
-                results['CSF'].append(1 - per_channel_loss[1])
-                results['tissue'].append(1 -per_channel_loss[2])
-                if opt.num_classes == 4:
-                    results['air'].append(1 -per_channel_loss[3])
-                else:
-                    results['air'].append(-1)
-
-                df = pd.DataFrame(results)
-                df.to_csv(opt.path_ckp+'/results.csv')
-
+    avg_loss, per_channel_loss = test(test_data_loader, model, dice_loss, opt)
+    print("===> Test fold {}:{}".format(fold, per_channel_loss))
             
 def train(training_data_loader, optimizer, model, epoch, dice_loss, opt):
     step = [i for i, step in enumerate(opt.lr_steps) if epoch > step][-1]
@@ -224,16 +140,17 @@ def validate(val_data_loader, model, epoch, criterion, opt):
     per_channel = torch.mean(torch.cat(per_channel, 0),0).cpu().numpy()
     return 1 - np.mean(per_channel[:2]), per_channel
 
-def test(val_data_loader, model, epoch, criterion, opt):
+def test(val_data_loader, model,criterion, opt):
     model.eval()
     per_channel = []
     for iteration, batch in enumerate(val_data_loader, 1):
         with torch.no_grad():
-            data, label,  _  = batch
+            data, label,  fname  = batch
             out, _, _, _ = model(data.cuda())
             #out = model(data.cuda())
-            loss_all, per_channel_loss = criterion(out.softmax(dim=1), one_hot_encoding(label.cuda(), opt.num_classes))
+            loss_all, per_channel_loss = criterion(out[:,:,::2, ::2].softmax(dim=1), one_hot_encoding(label[:,::2, ::2].cuda(), opt.num_classes))
             per_channel.append(per_channel_loss)
+            #save_fig(data, out, label, fname, opt.expm)
 
     per_channel = torch.mean(torch.cat(per_channel, 0),0).cpu().numpy()
     return 1 - np.mean(per_channel[:2]), per_channel
@@ -243,6 +160,27 @@ def unnormalize(data):
     std = torch.tensor([0.229, 0.224, 0.225]).view([1, 3, 1, 1])
     orig = data * std + mean
     return orig
+def save_fig(input, output, label, filenames,save_path):
+    if not os.path.exists(opt.expm + '/results'):
+        os.makedirs(opt.expm + '/results')
+    mri = unnormalize(input).cpu().numpy()
+    output = torch.argmax(output, 1).cpu().numpy()
+    label = label.cpu().numpy()
+    
+    for i in range(input.shape[0]):
+        combo=np.concatenate([mri[i][0] * 255, output[i]/2*255 , label[i]/2 *255], 1)
+        path = opt.expm + '/results/' + filenames[0].split('/')[-1] + '_' +str(i) + '.jpg'
+        cv2.imwrite(path, combo)
+        # plt.figure()
+        # plt.subplot(1,3,1)
+        # plt.imshow(mri[i][0])
+        # plt.subplot(1,3,2)
+        # plt.imshow(output[i])
+        # plt.subplot(1,3,3)
+        # plt.imshow(label[i])
+        # plt.savefig(opt.expm + '/results/' + filenames[0].split('/')[-1] + '_' +str(i) + '.jpg')
+        # plt.close()
+        
 
 
 def one_hot_encoding(target, num_classes):

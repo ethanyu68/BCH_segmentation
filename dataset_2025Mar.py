@@ -40,7 +40,7 @@ class Dataset(data.Dataset):
         self.ls_test_images = []
         for patient in ls_patients:
             path_patient = os.path.join(path_fdr, patient)
-            self.ls_test_images += [path_patient +'/'+ x for x in os.listdir(path_patient)]
+            self.ls_test_images += [path_patient +'/' + x for x in os.listdir(path_patient) if 'seg.' not in x and 'dmap.' not in x]
         # train images
         self.ls_images = []
         for f in range(1,6):

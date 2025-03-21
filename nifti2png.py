@@ -2,6 +2,7 @@ import os
 import numpy as np
 import nibabel as nib
 from tqdm import tqdm
+import cv2
 from inference_nii_BCH_0814 import generate_dmap, normalize_intensity, process_single
 from scipy.ndimage import zoom
 import matplotlib.pyplot as plt
@@ -34,14 +35,14 @@ def process_single(img, size, dmap=None, label=None):
 
 # Path to the dataset directory (modify this)
 dataset_path = "./data/nifti/etv167_NIFTI_pre_reviewed_0219/"  # Change to your dataset folder
-output_path = "./data/npy/etv167_NIFTI_pre_reviewed_0219/"
+output_path = "./data/png/etv167_NIFTI_pre_reviewed_0219/"
 # Get a list of patient folders
 patient_folders = sorted([f for f in os.listdir(dataset_path) if os.path.isdir(os.path.join(dataset_path, f))])
 
 print("Processing NIFTI files and saving as .npy...")
 
 # Iterate through each patient folder
-for patient in tqdm(patient_folders):
+for patient in ['4504150-FONTAINE_HELENA_P-20110715']:#tqdm(patient_folders):
     patient_path = os.path.join(dataset_path, patient)
     
     # Define MRI and label file paths
@@ -69,8 +70,8 @@ for patient in tqdm(patient_folders):
     for i in range(mri_array.shape[2]):
         input, dmap, label = process_single(img=mri_array[:, :, i], size=(448, 448), dmap=dmap, label=label_array[:,:,i])
         label[(label != 0) & (label!=1) & (label!=2)] = 0
-        np.save(save_npy_path + f'_{i}.npy', input)
-        np.save(save_npy_path + f'_{i}_dmap.npy', dmap)
-        np.save(save_npy_path + f'_{i}_seg.npy', label)
+        cv2.imwrite(save_npy_path + f'_{i}.png', input*255)
+        cv2.imwrite(save_npy_path + f'_{i}_dmap.png', dmap*255)
+        cv2.imwrite(save_npy_path + f'_{i}_seg.png', label/2*255)
 
 print("All files saved as .npy while preserving original structure!")
